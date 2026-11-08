@@ -1,10 +1,10 @@
-#!/bin/bash -e
+#!/bin/bash
+set -e
 
+# restart: on-failure reuses the container filesystem, and a stale lock makes Xvfb refuse :99.
+rm -f /tmp/.X99-lock
 Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
-xvfb_pid=$!
-
 export DISPLAY=:99
 
-poetry run python ./src/main.py
-
-kill $xvfb_pid
+# exec so SIGTERM from `docker stop` reaches Python instead of dying in bash.
+exec python src/main.py

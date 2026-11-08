@@ -1,46 +1,37 @@
-# Stage 1: Build project
+# Stage 1: resolve dependencies into an in-project venv
 FROM python:3.12-slim-bookworm AS build
 
-# Installing build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential
+ENV POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_IN_PROJECT=true \
+    POETRY_CACHE_DIR=/tmp/poetry_cache
 
-# Installing Poetry
-RUN python3 -m pip install --no-cache-dir poetry
+RUN pip install --no-cache-dir poetry
+
+WORKDIR /app
+COPY pyproject.toml poetry.lock ./
+RUN poetry install --only main --no-root && rm -rf $POETRY_CACHE_DIR
+
+# Stage 2: runtime with Xvfb and the browser, no Poetry
+FROM python:3.12-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
 
-# Copying project dependency files
-COPY pyproject.toml poetry.lock README.md /app/
+# Same base image as the build stage, so the venv's python symlinks stay valid.
+COPY --from=build /app/.venv /app/.venv
 
-# Installing project dependencies
-ENV PATH="/root/.local/bin:$PATH"
-RUN poetry config virtualenvs.create true
-RUN poetry config virtualenvs.in-project true
-RUN poetry install --no-interaction --no-ansi
+# chrome or chromium, must match CHANNEL in .env (Google Chrome has no linux/arm64 build).
+ARG BROWSER=chrome
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends xvfb \
+    && playwright install --with-deps ${BROWSER} \
+    && rm -rf /var/lib/apt/lists/*
 
-# Stage 2: Run project
-FROM python:3.12-slim-bookworm AS project
+# start.sh is tracked as 100644, so set the exec bit here instead of relying on the checkout.
+COPY --chmod=755 start.sh ./
+COPY src ./src
 
-# Installing runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    xvfb \
-    xauth \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-    
-COPY --from=build /app /app
-
-# Installing Playwright
-ENV PATH="/app/.venv/bin:$PATH"
-RUN python3 -m pip install --no-cache-dir poetry playwright && \
-    playwright install chrome --with-deps
-
-WORKDIR /app
-
-# Copying project files
-COPY src /app/src
-
-# Copying entypoint file
-COPY start.sh /app/
-RUN chmod +x /app/start.sh
-
-ENTRYPOINT ["/app/start.sh"]
+ENTRYPOINT ["./start.sh"]

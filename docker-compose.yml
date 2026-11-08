@@ -2,9 +2,12 @@ services:
   playwright:
     build:
       context: .
-      dockerfile: Dockerfile
+      args:
+        BROWSER: ${CHANNEL:-chrome}
     image: playwright-img
+    # tini as PID 1 reaps orphaned Chrome processes and forwards signals.
+    init: true
+    env_file: .env
     volumes:
       - ./extension:/app/extension
-      - ./.env:/app/.env
     restart: on-failure

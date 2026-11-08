@@ -23,9 +23,9 @@ The test application in this repository, loads the MetaMask extension, creates a
 
 You need to specify the name of the file to start, and the path to it (if it is not in the Dockerfile folder) in the `start.sh` file.
 ```bash
-poetry run python ./src/main.py
+exec python src/main.py
 ```
-Compose file contains path's to files, what you need to mount in your Docker container. Use `Volumes` in Compose file for this. Edit path's or change files.
+Create `.env` from `.env-example` before the first run: Compose passes it to the container and reads `CHANNEL` from it to pick the browser installed in the image. Directories you need inside the container go under `volumes` in the Compose file.
 
 **Step 3:** Run the Application Using Docker Compose.
 
@@ -48,11 +48,7 @@ If you encounter issues, try:
 ```bash
 docker compose logs -f
 ```
-- Try to use Chromium channel instead of Chrome (**don't forget to change the Dockerfile** for install chromium, and channel of the browser in your application).
-```Dockerfile
-RUN python3 -m pip install --no-cache-dir poetry playwright && \
-    playwright install chromium --with-deps
-```
+- Try to use Chromium channel instead of Chrome: set `CHANNEL=chromium` in `.env` and rebuild the image. Google Chrome has no Linux ARM64 build, so on Apple Silicon use Chromium (or add `platform: linux/amd64` to the service).
 - Try HEADLESS=True.
 - Try to rebuild image (or fully).
 ```bash
@@ -65,15 +61,14 @@ If application doesn't start, ensure that Docker and Docker Compose are running 
 ## Container details
 
 ### Dockerfile
-Creating Docker image with Python 3.12 using the most lightweight image on, with 2 stages. In the 1st stage the virtual environment, and application dependencies are created. The 2nd stage installs the dependencies for headed mode, copies the virtual environment that was created in the first stage and installs the browser for your application.
+Creating Docker image with Python 3.12 on `slim-bookworm`, with 2 stages. The 1st stage creates the virtual environment with Poetry from `poetry.lock`. The 2nd stage copies only that virtual environment (Poetry itself does not get into the final image), installs Xvfb and the browser selected by the `BROWSER` build arg (`chrome` or `chromium`, Compose fills it from `CHANNEL`).
 
 ### docker-compose.yml
-Docker Compose makes it easier to launch an application. Compose creates the service and mounts the partitions needed to run the application. 
+Docker Compose makes it easier to launch an application. Compose builds the image, passes `.env` as environment variables and mounts the directories needed to run the application. `init: true` runs a tiny init as PID 1 so Chrome child processes are reaped and `docker compose stop` works without waiting for the timeout.
 
 | Volume              | Description                                                      |
 |---------------------|------------------------------------------------------------------|
-| `/extension`        | The directory where MetaMask extension is stored.                |                               |
-| `/.env`             | File in which the application operation parameters are recorded. |
+| `/extension`        | The directory where MetaMask extension is stored.                |
 
 ### start.sh
-This is a script that starts Xvfb, configures it and then runs the `main.py` file. When the application is finished, the Xvfb service will be killed.
+This is a script that removes a stale Xvfb lock left by a previous run (the container is restarted with `restart: on-failure`), starts Xvfb on display `:99` and then replaces itself with `python src/main.py`, so stop signals go straight to the application.
